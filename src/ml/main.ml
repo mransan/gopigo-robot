@@ -6,6 +6,8 @@ let lwt_ignore _ = Lwt.return_unit
 let () = 
   let fd = Control.create () in  
 
+  let t0 = Unix.gettimeofday () in 
+
   let done_ = ref false in 
 
   let until_done ?delay f = 
@@ -17,13 +19,22 @@ let () =
       | Some delay -> Lwt_unix.sleep delay >>= f 
     ) 
   in 
+  
+  let us_distance = ref 100 in 
 
   let main_t = 
     Control.fwd fd
-    (* Lwt.return_unit *) 
-    >>= (fun () -> Lwt_unix.sleep 20.0) 
-    >>= (fun () -> Control.stop fd)
-    >>= (fun () -> done_ := true; Lwt.return_unit) in 
+  in 
+
+  let rec stop_if_too_closed () = 
+    let now = Unix.gettimeofday () in 
+    if !us_distance < 10 || (now -.  t0 > 20.)  
+    then (
+      done_ := true; 
+      Control.stop fd 
+    ) 
+    else until_done ~delay:0.1 stop_if_too_closed
+  in 
 
   let rec blink_loop () = 
     let delay = 0.05 in
@@ -38,7 +49,6 @@ let () =
   
   let m1_speed = Speed.create () in 
   let m2_speed = Speed.create () in 
-  let us_distance = ref 0 in 
 
   let rec update_counter_loop ()  = 
     Control.read_counter fd 0  
@@ -81,6 +91,7 @@ let () =
   Lwt_main.run (
     Lwt.join [
       main_t;
+      stop_if_too_closed (); 
       read_encoder (); 
       print_speed_loop (); 
       blink_loop (); 

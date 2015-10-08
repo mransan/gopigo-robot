@@ -70,7 +70,7 @@ let read_cmd ?delay ?d1 ?d2 ?d3 id n fd =
     )
   ) 
 
-let fwd            = single_cmd 119
+let fwd            = single_cmd 115
 
 let stop           = single_cmd 120
 
