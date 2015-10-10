@@ -10,14 +10,14 @@ let () =
 
   let speeds = 
     let rec loop l = function 
-      | 2 -> l 
-      | i  -> loop ((Speed.create ~dampening:i ())::l) (i - 1)
+      | -1  -> l 
+      | i  -> loop ((Frequency.create ~dampening:i ())::l) (i - 1)
     in 
     loop [] 4 
   in 
 
   let string_of_speeds () = 
-    String.concat ", " @@ List.map (fun s -> string_of_float @@ Speed.speed s) speeds 
+    String.concat ", " @@ List.map (fun s -> string_of_float @@ Frequency.value s) speeds 
   in 
 
   let set_speed i () = 
@@ -46,7 +46,7 @@ let () =
     Done.iter ~delay:0.25 done_ (fun () ->
       Gopigo.read_encoder fd `Right 
       >|=(fun i -> 
-        List.iter (fun s -> Speed.update_counter s i) speeds
+        List.iter (fun s -> Frequency.update_counter s i) speeds
       )  
     )
   in 
@@ -54,9 +54,10 @@ let () =
   let print_t = 
     Lwt_io.open_file Lwt_io.Output "calibrator.csv"
     >>= (fun channel -> 
-      Done.iter ~delay:0.05 done_ (fun () -> 
-        Lwt_io.fprintf channel "%f, %s \n"
-          (Speed.time (List.hd speeds) -. t0 )
+      Done.iter ~delay:0.01 done_ (fun () -> 
+        Lwt_io.fprintf channel "%i, %f, %s \n"
+          (Frequency.counter (List.hd speeds))
+          (Frequency.last_observation_time (List.hd speeds) -. t0 )
           (string_of_speeds () )
       )
     )

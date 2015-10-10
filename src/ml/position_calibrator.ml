@@ -12,7 +12,6 @@ let () =
 
   let fd = Gopigo.create () in 
 
-  
   let right_encoder, left_encoder = 
     Lwt_main.run (
       Gopigo.read_encoder fd `Right 
@@ -34,10 +33,14 @@ let () =
     >>=(fun () -> Gopigo.set_speed fd `Right (i -5 ))
   in 
 
+  let ignore_wrap f arg = fun () -> 
+    f arg 
+  in 
+
   let main_t = 
     set_speed speed () 
-    >>= (fun () -> Gopigo.fwd fd)
-    >>= (fun () -> Lwt_unix.sleep total_time)
+    >>= ignore_wrap Gopigo.fwd fd
+    >>= ignore_wrap Lwt_unix.sleep total_time
     >>= (fun () -> 
       Done.interupt done_;
       Gopigo.stop fd 

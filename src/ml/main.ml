@@ -11,8 +11,8 @@ let () =
 
   let us_distance = ref 100 in 
 
-  let m1_speed = Speed.create () in 
-  let m2_speed = Speed.create () in 
+  let m1_speed = Frequency.create () in 
+  let m2_speed = Frequency.create () in 
 
   let m1_set_speed = ref 45 in 
   let m2_set_speed = ref 57 in 
@@ -27,8 +27,8 @@ let () =
   let main_t = 
     let loop () = 
       Done.iter ~delay:0.2 done_ (fun () ->  
-        m1_set_speed := calculate_speed (Speed.speed m1_speed) !m1_set_speed;
-        m2_set_speed := calculate_speed (Speed.speed m2_speed) !m2_set_speed;
+        m1_set_speed := calculate_speed (Frequency.value m1_speed) !m1_set_speed;
+        m2_set_speed := calculate_speed (Frequency.value m2_speed) !m2_set_speed;
         Gopigo.set_speed fd `Left !m1_set_speed 
         >>= (fun () -> Gopigo.set_speed fd `Right !m2_set_speed) 
       )
@@ -68,10 +68,10 @@ let () =
   let update_counter_loop ()  = 
     Done.iter ~delay:0.5 done_ (fun () -> 
       Gopigo.read_encoder fd `Left 
-      >|= Speed.update_counter m1_speed 
+      >|= Frequency.update_counter m1_speed 
       >>= (fun () -> 
         Gopigo.read_encoder fd `Right 
-        >|= Speed.update_counter m2_speed 
+        >|= Frequency.update_counter m2_speed 
       )
       >>= (fun () -> Gopigo.read_us_distance fd) 
       >|= (fun x  -> us_distance := x) 
@@ -81,7 +81,7 @@ let () =
   let print_speed_loop () = 
     Done.iter done_ ~delay:0.1 (fun () -> 
       Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | %3i cm \n" 
-        (Speed.speed m1_speed) (Speed.counter m1_speed) (Speed.speed m2_speed) 
+        (Frequency.value m1_speed) (Frequency.counter m1_speed) (Frequency.value m2_speed) 
         (!m1_set_speed) (!m2_set_speed ) !us_distance  
     )
   in 
