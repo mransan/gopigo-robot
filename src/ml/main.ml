@@ -7,18 +7,8 @@ let () =
 
   let t0 = Unix.gettimeofday () in 
 
-  let done_ = ref false in 
+  let done_ = Done.create () in 
 
-  let until_done ?delay f = 
-    if !done_ 
-    then Lwt.return_unit 
-    else (
-      match delay with 
-      | None -> f () 
-      | Some delay -> Lwt_unix.sleep delay >>= f 
-    ) 
-  in 
-  
   let us_distance = ref 100 in 
 
   let m1_speed = Speed.create () in 
@@ -35,13 +25,13 @@ let () =
   in 
 
   let main_t = 
-    let rec loop () = 
-      m1_set_speed := calculate_speed (Speed.speed m1_speed) !m1_set_speed;
-      m2_set_speed := calculate_speed (Speed.speed m2_speed) !m2_set_speed;
-      Gopigo.set_speed fd `Left !m1_set_speed 
-      >>= (fun () -> Gopigo.set_speed fd `Right !m2_set_speed) 
-      >>= (fun () -> Lwt_unix.sleep 0.2)
-      >>= (fun () -> until_done loop )
+    let loop () = 
+      Done.iter ~delay:0.2 done_ (fun () ->  
+        m1_set_speed := calculate_speed (Speed.speed m1_speed) !m1_set_speed;
+        m2_set_speed := calculate_speed (Speed.speed m2_speed) !m2_set_speed;
+        Gopigo.set_speed fd `Left !m1_set_speed 
+        >>= (fun () -> Gopigo.set_speed fd `Right !m2_set_speed) 
+      )
     in 
     Gopigo.set_speed fd `Left 35
     >>= (fun () -> Gopigo.set_speed fd `Right 47) 
@@ -49,47 +39,51 @@ let () =
     >>= (fun () -> loop ())
   in 
 
-  let rec stop_if_too_closed () = 
-    let now = Unix.gettimeofday () in 
-    if (!us_distance > 0 && !us_distance < 20 )|| (now -.  t0 > 20.)  
-    then (
-      done_ := true; 
-      Gopigo.stop fd 
-    ) 
-    else until_done ~delay:0.5 stop_if_too_closed
+  let stop_if_too_closed () = 
+    Done.iter ~delay:0.5 done_ (fun () -> 
+      let now = Unix.gettimeofday () in 
+      if (!us_distance > 0 && !us_distance < 20 )|| (now -.  t0 > 20.)  
+      then (
+        Done.interupt done_;
+        Gopigo.stop fd 
+      ) 
+      else Lwt.return_unit 
+    )
   in 
 
-  let rec blink_loop () = 
-    let delay = 0.5 in
-    Gopigo.led fd `On `Right 
-    >>=(fun () -> Lwt_unix.sleep delay)  
-    >>=(fun () -> Gopigo.led fd `Off `Right) 
-    >>=(fun () -> Gopigo.led fd `On  `Left) 
-    >>=(fun () -> Lwt_unix.sleep delay)  
-    >>=(fun () -> Gopigo.led fd `Off `Left) 
-    >>=(fun () -> until_done blink_loop) 
+  let blink_loop () = 
+    Done.iter done_ (fun () -> 
+      let delay = 0.5 in
+      Gopigo.led fd `On `Right 
+      >>=(fun () -> Lwt_unix.sleep delay)  
+      >>=(fun () -> Gopigo.led fd `Off `Right) 
+      >>=(fun () -> Gopigo.led fd `On  `Left) 
+      >>=(fun () -> Lwt_unix.sleep delay)  
+      >>=(fun () -> Gopigo.led fd `Off `Left) 
+    )
   in 
   
-
   let motor_speed = ref (0, 0) in 
 
-  let rec update_counter_loop ()  = 
-    Gopigo.read_encoder fd `Left 
-    >|= Speed.update_counter m1_speed 
-    >>= (fun () -> 
-      Gopigo.read_encoder fd `Right 
-      >|= Speed.update_counter m2_speed 
+  let update_counter_loop ()  = 
+    Done.iter ~delay:0.5 done_ (fun () -> 
+      Gopigo.read_encoder fd `Left 
+      >|= Speed.update_counter m1_speed 
+      >>= (fun () -> 
+        Gopigo.read_encoder fd `Right 
+        >|= Speed.update_counter m2_speed 
+      )
+      >>= (fun () -> Gopigo.read_us_distance fd) 
+      >|= (fun x  -> us_distance := x) 
     )
-    >>= (fun () -> Gopigo.read_us_distance fd) 
-    >|= (fun x  -> us_distance := x) 
-    >>= (fun () -> until_done ~delay:0.25 update_counter_loop)
   in   
 
-  let rec print_speed_loop () = 
-    Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | %3i cm \n" 
-      (Speed.speed m1_speed) (Speed.counter m1_speed) (Speed.speed m2_speed) 
-      (!m1_set_speed) (!m2_set_speed ) !us_distance  
-    >>=(fun () -> until_done ~delay:0.1 print_speed_loop)
+  let print_speed_loop () = 
+    Done.iter done_ ~delay:0.1 (fun () -> 
+      Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | %3i cm \n" 
+        (Speed.speed m1_speed) (Speed.counter m1_speed) (Speed.speed m2_speed) 
+        (!m1_set_speed) (!m2_set_speed ) !us_distance  
+    )
   in 
 
   let read_encoder () = 
@@ -109,7 +103,7 @@ let () =
       catch @@ stop_if_too_closed (); 
       catch @@ read_encoder (); 
       catch @@ print_speed_loop (); 
-      (*catch @@ blink_loop (); *) 
+      catch @@ blink_loop (); 
       (* rotate_servo true 90; *)  
     ] 
   )

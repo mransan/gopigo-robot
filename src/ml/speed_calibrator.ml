@@ -6,6 +6,8 @@ let () =
   let fd = Gopigo.create () in 
   let t0 = Unix.gettimeofday () in 
 
+  let done_ = Done.create () in 
+
   let speeds = 
     let rec loop l = function 
       | 2 -> l 
@@ -18,18 +20,6 @@ let () =
     String.concat ", " @@ List.map (fun s -> string_of_float @@ Speed.speed s) speeds 
   in 
 
-  let done_ = ref false in 
-  
-  let until_done ?delay f = 
-    if !done_ 
-    then Lwt.return_unit 
-    else (
-      match delay with 
-      | None -> f () 
-      | Some delay -> Lwt_unix.sleep delay >>= f 
-    ) 
-  in 
-
   let set_speed i () = 
     Gopigo.set_speed fd `Left i 
     >>=(fun () -> Gopigo.set_speed fd `Right (i + 12))
@@ -38,7 +28,7 @@ let () =
   let main_t = 
 
     let rec slow_down = function 
-      | 0 -> (done_ :=true ; Gopigo.stop fd )
+      | 0 -> (Done.interupt done_ ; Gopigo.stop fd )
       | i -> (
         set_speed i ()
         >>= (fun () -> Lwt_unix.sleep 0.05)
@@ -53,25 +43,24 @@ let () =
   in 
 
   let read_t = 
-    let rec loop () = 
+    Done.iter ~delay:0.25 done_ (fun () ->
       Gopigo.read_encoder fd `Right 
       >|=(fun i -> 
         List.iter (fun s -> Speed.update_counter s i) speeds
       )  
-      >>= (fun () -> until_done ~delay:0.25 loop)
-    in  
-    loop () 
+    )
   in 
 
   let print_t = 
-    let rec loop channel () = 
-      Lwt_io.fprintf channel "%f, %s \n"
-        (Speed.time (List.hd speeds) -. t0 )
-        (string_of_speeds () )
-      >>=(fun () -> until_done ~delay:0.05 (loop channel))
-    in 
     Lwt_io.open_file Lwt_io.Output "calibrator.csv"
-    >>= (fun channel -> loop channel ())  
+    >>= (fun channel -> 
+      Done.iter ~delay:0.05 done_ (fun () -> 
+        Lwt_io.fprintf channel "%f, %s \n"
+          (Speed.time (List.hd speeds) -. t0 )
+          (string_of_speeds () )
+      )
+    )
+      
   in 
       
   Lwt_main.run (Lwt.join [
