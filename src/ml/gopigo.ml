@@ -70,19 +70,36 @@ let read_cmd ?delay ?d1 ?d2 ?d3 id n fd =
     )
   ) 
 
-let fwd            = single_cmd 115
+let fwd            = single_cmd 119
 
 let stop           = single_cmd 120
 
 let enable_encoder = single_cmd 51
+
+let decrease_speed = single_cmd 103 
+
+let increase_speed  = single_cmd 116
+
+let set_speed fd which speed = 
+  let id = match which with
+    | `Left -> 70 
+    | `Right -> 71
+  in  
+  Lwt_mutex.with_lock device_mtx (fun () -> 
+    write fd @@ cmd ~d1:speed id 
+  ) 
 
 let move_servo fd angle = 
   Lwt_mutex.with_lock device_mtx (fun () -> 
     write fd @@ cmd ~d1:angle 101 
   )  
 
-let read_counter fd i = 
-  read_cmd ~d1:i 53 2 fd 
+let read_encoder fd which = 
+  let d1 = match which with 
+    | `Left -> 0 
+    | `Right -> 1 
+  in 
+  read_cmd ~d1 53 2 fd 
   >>=(fun b -> 
     let b0 = Char.code @@ Bytes.get b 0  in 
     let b1 = Char.code @@ Bytes.get b 1  in 
