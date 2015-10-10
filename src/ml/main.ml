@@ -40,27 +40,15 @@ let () =
   in 
 
   let stop_if_too_closed () = 
-    Done.iter ~delay:0.5 done_ (fun () -> 
-      let now = Unix.gettimeofday () in 
-      if (!us_distance > 0 && !us_distance < 20 )|| (now -.  t0 > 20.)  
-      then (
-        Done.interupt done_;
-        Gopigo.stop fd 
-      ) 
-      else Lwt.return_unit 
-    )
+    Small_behavior.stop_if_too_close done_ fd ~delay:0.5 ~distance:0.2
+  in 
+
+  let stop_later () = 
+    Small_behavior.stop_later done_ fd 20. 
   in 
 
   let blink_loop () = 
-    Done.iter done_ (fun () -> 
-      let delay = 0.5 in
-      Gopigo.led fd `On `Right 
-      >>=(fun () -> Lwt_unix.sleep delay)  
-      >>=(fun () -> Gopigo.led fd `Off `Right) 
-      >>=(fun () -> Gopigo.led fd `On  `Left) 
-      >>=(fun () -> Lwt_unix.sleep delay)  
-      >>=(fun () -> Gopigo.led fd `Off `Left) 
-    )
+    Small_behavior.led_blink done_ fd 0.5 
   in 
   
   let motor_speed = ref (0, 0) in 
@@ -73,16 +61,14 @@ let () =
         Gopigo.read_encoder fd `Right 
         >|= Frequency.update_counter m2_speed 
       )
-      >>= (fun () -> Gopigo.read_us_distance fd) 
-      >|= (fun x  -> us_distance := x) 
     )
   in   
 
   let print_speed_loop () = 
     Done.iter done_ ~delay:0.1 (fun () -> 
-      Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | %3i cm \n" 
+      Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | cm \n" 
         (Frequency.value m1_speed) (Frequency.counter m1_speed) (Frequency.value m2_speed) 
-        (!m1_set_speed) (!m2_set_speed ) !us_distance  
+        (!m1_set_speed) (!m2_set_speed ) 
     )
   in 
 
@@ -104,6 +90,7 @@ let () =
       catch @@ read_encoder (); 
       catch @@ print_speed_loop (); 
       catch @@ blink_loop (); 
+      catch @@ stop_later (); 
       (* rotate_servo true 90; *)  
     ] 
   )

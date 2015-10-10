@@ -119,7 +119,7 @@ let read_us_distance fd =
   >>=(fun b -> 
     let b0 = Char.code @@ Bytes.get b 0  in 
     let b1 = Char.code @@ Bytes.get b 1  in 
-    Lwt.return @@ b0 * 256 + b1 
+    Lwt.return @@ (float_of_int (b0 * 256 + b1)) /. 100. 
   ) 
 
 let led fd mode which = 

@@ -35,8 +35,8 @@ val read_encoder : t -> [`Left | `Right ] -> int Lwt.t
 val read_speed : t -> (int * int) Lwt.t 
 (** [read_speed t] returns the speed [(left, right)] of the motors *)
 
-val read_us_distance : t -> int Lwt.t 
-(** [read_us_distance t] reads the ultra sonic distance in cm *)
+val read_us_distance : t -> float Lwt.t 
+(** [read_us_distance t] reads the ultra sonic distance in meters *)
 
 val led : t -> [`On | `Off] -> [`Left | `Right] -> unit Lwt.t
 (** [lef t `On `Left] turn the [`Left] led [`On] *)
