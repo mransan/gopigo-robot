@@ -1,4 +1,10 @@
+type robot_geometry = {
+  counts_per_revolution : int; 
+  wheel_diameter: float;
+  b: float; (** distance between wheels *) 
+}
 
+let pi = 4. *. atan 1.0 
 
 type t = {
   conversion_ratio : float;
@@ -11,18 +17,24 @@ type t = {
 }
 
 let x {x; _ } = x 
+
 let y {y; _ } = y 
+
 let theta {theta; _ } = theta 
 
-let create conversion_ratio b previous_right_counter previous_left_counter () =  {
-  conversion_ratio; 
-  b;
-  previous_right_counter; 
-  previous_left_counter; 
-  x = 0.0; 
-  y = 0.0; 
-  theta = 0.0;
-}
+let create ~robot_geometry ~right_encoder ~left_encoder () =  
+  let conversion_ratio = 
+    pi *. robot_geometry.wheel_diameter 
+      /. (float_of_int robot_geometry.counts_per_revolution)  in 
+  {
+    conversion_ratio = conversion_ratio;  
+    b = robot_geometry.b;
+    previous_right_counter = right_encoder; 
+    previous_left_counter = left_encoder; 
+    x = 0.0; 
+    y = 0.0; 
+    theta = 0.0;
+  }
 
 let update t right_counter left_counter = 
   let sr = float_of_int (right_counter - t.previous_right_counter) in 

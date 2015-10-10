@@ -21,16 +21,19 @@ let () =
       )
     ) in 
 
-  let conversion_ratio = pi *. 0.063 /. 18. in  
-  let b = 0.111 in 
-  let robot = Differential_steering.create 
-    conversion_ratio b right_encoder left_encoder () in 
+  let robot_geometry = Differential_steering.({
+    b = 0.111;
+    wheel_diameter  = 0.063; 
+    counts_per_revolution = 18; 
+  }) in 
+
+  let robot = Differential_steering.create ~robot_geometry ~right_encoder ~left_encoder () in 
 
   let done_ = Done.create () in 
   
   let set_speed i () = 
     Gopigo.set_speed fd `Left i 
-    >>=(fun () -> Gopigo.set_speed fd `Right (i -5 ))
+    >>=(fun () -> Gopigo.set_speed fd `Right (i - 5 ))
   in 
 
   let ignore_wrap f arg = fun () -> 
