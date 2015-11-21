@@ -5,11 +5,7 @@ let lwt_ignore _ = Lwt.return_unit
 let () = 
   let fd = Gopigo.create () in  
 
-  let t0 = Unix.gettimeofday () in 
-
   let done_ = Done.create () in 
-
-  let us_distance = ref 100 in 
 
   let m1_speed = Frequency.create () in 
   let m2_speed = Frequency.create () in 
@@ -40,7 +36,7 @@ let () =
   in 
 
   let stop_if_too_closed () = 
-    Small_behavior.stop_if_too_close done_ fd ~delay:0.5 ~distance:0.2
+    Small_behavior.stop_if_too_close done_ fd ~delay:0.5 ~distance:0.1
   in 
 
   let stop_later () = 
@@ -65,7 +61,7 @@ let () =
   in   
 
   let print_speed_loop () = 
-    Done.iter done_ ~delay:0.1 (fun () -> 
+    Done.iter done_ ~delay:1. (fun () -> 
       Lwt_io.printf " %5f (%i)|  %5f | (%3i , %3i) | cm \n" 
         (Frequency.value m1_speed) (Frequency.counter m1_speed) (Frequency.value m2_speed) 
         (!m1_set_speed) (!m2_set_speed ) 
@@ -79,6 +75,7 @@ let () =
 
   let catch t = 
     Lwt.catch (fun () -> t) (fun exn -> 
+      Done.interupt done_; 
       Lwt_io.printl @@ Printexc.to_string exn
     )
   in 
@@ -86,10 +83,10 @@ let () =
   Lwt_main.run (
     Lwt.join [
       catch @@ main_t;
-      catch @@ stop_if_too_closed (); 
+      catch @@ stop_if_too_closed ();
       catch @@ read_encoder (); 
       catch @@ print_speed_loop (); 
-      catch @@ blink_loop (); 
+      catch @@ blink_loop ();
       catch @@ stop_later (); 
       (* rotate_servo true 90; *)  
     ] 

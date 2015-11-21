@@ -2,10 +2,12 @@ open Lwt.Infix
 
 external gopigo_init_device : unit -> Unix.file_descr = "gopigo_init_device"
 
-type t = Lwt_unix.file_descr 
+type t = {
+  fd : Lwt_unix.file_descr 
+}
 
 let create () = 
-  Lwt_unix.of_unix_file_descr ~blocking:false @@ gopigo_init_device () 
+  {fd = Lwt_unix.of_unix_file_descr ~blocking:false @@ gopigo_init_device () } 
 
 let if_some v f = 
   match v with 
@@ -21,10 +23,13 @@ let cmd ?d1 ?d2 ?d3 id =
   if_some d3 (fun i -> Bytes.set cmd 4 (Char.chr i)); 
   cmd
 
-let write fd cmd : unit Lwt.t = 
-  Lwt_unix.write fd cmd 0 5 
+let write {fd} cmd : unit Lwt.t = 
+  Lwt_io.printl "write"
+  >>=(fun () ->
+    Lwt_unix.write fd cmd 0 5 
+  )
   >>= (fun written  -> 
-    Lwt_unix.sleep 0.005
+    Lwt_unix.sleep 0.010
     >>= (fun () -> 
       if written <> 5
       then 
@@ -33,7 +38,7 @@ let write fd cmd : unit Lwt.t =
     )
   )
 
-let read fd n : bytes Lwt.t = 
+let read {fd} n : bytes Lwt.t = 
   (* check n < 5 *) 
   let b = Bytes.make 5 (Char.chr 0) in 
   let rec loop = function 
@@ -41,14 +46,15 @@ let read fd n : bytes Lwt.t =
     | i -> (
       Lwt_unix.read fd b i 1 
       >>= (fun _ -> 
-        Lwt_unix.sleep 0.005
+        Lwt_unix.sleep 0.010
       )
       >>= (fun () -> 
         loop (i + 1)
       )
     ) 
   in 
-  loop 0 
+  Lwt_io.printl "read"
+  >>=(fun () -> loop 0) 
 
 let device_mtx = Lwt_mutex.create ()   
 
@@ -115,7 +121,7 @@ let read_speed fd =
   ) 
 
 let read_us_distance fd = 
-  read_cmd ~delay:0.08 ~d1:15 117 2 fd 
+  read_cmd ~delay:0.1 ~d1:15 117 2 fd 
   >>=(fun b -> 
     let b0 = Char.code @@ Bytes.get b 0  in 
     let b1 = Char.code @@ Bytes.get b 1  in 

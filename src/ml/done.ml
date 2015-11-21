@@ -4,7 +4,8 @@ type t = bool ref
 
 let create () = ref false 
 
-let interupt done_  = done_ := true 
+let interupt done_  = 
+  done_ := true 
 
 let exec ?delay done_ f = 
   if !done_
