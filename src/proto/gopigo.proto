@@ -1,0 +1,41 @@
+
+
+message Command {
+
+    enum Type {
+        Sensors    = 1; 
+        Fwd        = 2;
+        Stop       = 3; 
+        Set_speed  = 4; 
+        Led_on     = 5;
+        Led_off    = 6;
+
+    }
+
+    enum Side {
+        Left  = 1; 
+        Right = 2; 
+    }
+
+    required Type type_ = 1; 
+    optional Side side  = 2; 
+    optional int32 speed_value = 3; 
+}
+
+message Sensors {
+    required int32  left_encoder  = 1;
+    required int32  right_encoder = 2;
+    required double us_distance   = 3;
+}
+
+message Output  {
+    
+    enum Type {
+        Ok = 1; 
+        Sensors = 2;
+    }
+
+    required Type type_       = 1; 
+    optional Sensors sensors  = 2; 
+}
+

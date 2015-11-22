@@ -1,7 +1,7 @@
 
 OCB_FLAGS = -use-ocamlfind \
 			-I src/ml -I src/ \
-			-pkg lwt,lwt.unix,unix \
+			-pkg str,lwt,lwt.unix,unix \
 			-lflags src/c/gopigo_stubs.o
 
 OCB = 		ocamlbuild $(OCB_FLAGS)
@@ -14,6 +14,12 @@ src/c/gopigo_stubs.o:src/c/gopigo_stubs.c
 
 main.native:src/c/gopigo_stubs.o
 	$(OCB) main.native
+
+gopigo_server.native:src/ml/gopigo_server.ml src/c/gopigo_stubs.o
+	$(OCB) $@ 
+
+gopigo_client.native:src/ml/gopigo_client.ml src/c/gopigo_stubs.o
+	$(OCB) $@ 
 
 speed_calibrator.native:src/c/gopigo_stubs.o
 	$(OCB) speed_calibrator.native
