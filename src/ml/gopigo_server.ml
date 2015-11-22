@@ -3,27 +3,17 @@ open Lwt.Infix
 
 module Msg = Gopigo_pb 
 
-module Int_16_codec = struct 
+module Command_lwt = Pblwtrt.Make(struct 
+  type t = Msg.command 
+  let encode = Msg.encode_command
+  let decode = Msg.decode_command 
+end)
 
-  let size = 2
-  
-  let encode (x:int) (buffer:bytes) (start:int) = 
-
-    let f mask shift_size = 
-       Char.unsafe_chr @@  ((x land mask) lsr shift_size) 
-    in 
-    Bytes.set buffer (start + 0) @@ f 0x0000FF00 8;  
-    Bytes.set buffer (start + 1) @@ f 0x000000FF 0;
-    ()
-
-  let decode buffer start = 
-    let f i shift_size = 
-      (Bytes.get buffer i |> Char.code )lsl shift_size
-    in 
-    f 0 8 
-    lor f 1 0
-end 
-
+module Output_lwt = Pblwtrt.Make(struct 
+  type t = Msg.output 
+  let encode = Msg.encode_output
+  let decode = Msg.decode_output
+end)
 
 let gopigo_handle = Gopigo.create () 
 
@@ -31,6 +21,18 @@ let ok_output = Lwt.return {
   Msg.encoder_value = None; 
   us_distance = None; 
   type_ = Msg.Ok
+}
+
+type robot = {
+  mutable left_encoder : int; 
+  mutable right_encoder : int; 
+  mutable us_distance : float; 
+}
+
+let robot = {
+  left_encoder = 0;
+  right_encoder = 0;
+  us_distance = 0.; 
 }
 
 let convert_side = function 
@@ -51,41 +53,92 @@ let handle_command {Msg.type_ ; side; speed_value} =
      >>= (fun () -> ok_output)
   | _ -> Lwt.fail_with "Unrecognize command" 
 
+let rec main_loop gopigo cmd_queue = 
+  let t0 = Unix.gettimeofday () in 
+  
+  Gopigo.read_encoder gopigo `Left 
+  >>=(fun left_encoder_value -> 
+    Gopigo.read_encoder gopigo `Right 
+    >>=(fun right_encoder_value -> 
+      Lwt.return (left_encoder_value, right_encoder_value)
+    )
+  )
+  >>=(fun encoder_values -> 
+    Gopigo.read_us_distance gopigo 
+    >>= (fun us_distance -> 
+      Lwt.return (encoder_values, us_distance)
+    )
+  )
+  >>=(fun ((left, right), us_distance) -> 
+    robot.left_encoder  <- left;
+    robot.right_encoder <- right;
+    robot.us_distance   <- us_distance;
+
+    let t1 = Unix.gettimeofday () in 
+    let elapsed_ms = (t1 -. t0) *. 1_000. in
+    Lwt.ignore_result @@ Lwt_io.printf "%10.5f | (%i, %i), %f\n" elapsed_ms left right us_distance;
+    Lwt.return_unit
+  )
+  >>= (fun () -> 
+    if Queue.length cmd_queue > 0 
+    then (
+      let cmd = Queue.pop cmd_queue in 
+      handle_command cmd >>= (fun _ -> Lwt.return_unit) 
+    )
+    else Lwt.return_unit 
+  ) 
+  >>= (fun () -> 
+    let t1 = Unix.gettimeofday () in 
+    let sleep_s = 0.250 -. (t1 -. t0) in 
+    if sleep_s >= 0. 
+    then Lwt_unix.sleep sleep_s
+    else (
+      Lwt.ignore_result @@ Lwt_io.printf "Could not keep up with time interval %f\n" sleep_s;
+      Lwt.return_unit
+    )
+  )
+  >>=(fun () -> main_loop gopigo cmd_queue) 
+
+let init gopigo = 
+  Gopigo.set_speed gopigo `Left 65
+  >>=(fun () -> Gopigo.set_speed gopigo `Right 75)
+
+let pipe_name = "/tmp/gopigo_server" 
 
 let () = 
 
   ignore @@ Unix.umask 0o000; 
+  if not (Sys.file_exists pipe_name)
+  then Unix.mkfifo pipe_name 0o666;  
+    
+  let cmd_queue = Queue.create () in 
 
-  let pipe_name = "/tmp/gopigo_server" in 
-  Unix.mkfifo pipe_name 0o666;  
   let t = 
     Lwt_unix.openfile pipe_name [Unix.O_RDWR;Unix.O_CREAT; Unix.O_TRUNC] 0o666
     >>= (fun fd -> 
 
-      let buffer = Bytes.create 4 in  
       let rec loop () = 
-        Lwt_unix.read fd buffer 0 2
-        >>= (function 
-          | i when i = Int_16_codec.size  -> 
-            let msg_length = Int_16_codec.decode buffer 0 in 
-            let buffer = Bytes.create msg_length in  
-            Lwt_unix.read fd buffer 0 msg_length 
-            >|= (fun x -> (x, buffer))  
-          | x -> Lwt.fail_with (Printf.sprintf "Error reading from pipe: %i" x) 
-        )
-        >>= (function
-          | 0, _      -> Lwt.fail_with "0 bytes read... failure"
-          | _, buffer -> 
-              let decoder = Protobuf_codec.Decoder.of_bytes buffer in 
-              let cmd = Msg.decode_command decoder in 
-              Printf.printf "Command received: %s \n%!" (Msg.string_of_command cmd); 
-              Lwt.return cmd
+        Command_lwt.read fd 
+        >>= (fun cmd -> 
+          match cmd with
+          | {Msg.type_ = Msg.Read_us_distance; side = None; speed_value = None; } -> (
+            
+            let output = {
+              Msg.type_ = Us_distance;  
+              Msg.encoder_value = None;
+              Msg.us_distance = Some (robot.us_distance);
+            } in 
+            Output_lwt.write fd output 
+          )
+          | _ -> Lwt.return @@ Queue.push cmd cmd_queue 
         ) 
-        >>= handle_command
-        >|= (fun _ -> ()) 
         >>= loop
       in
       loop () 
     )
   in 
-  Lwt_main.run t 
+
+  Lwt_main.run (Lwt.join [
+    t;  
+    init gopigo_handle >>= (fun () -> main_loop gopigo_handle cmd_queue) 
+  ])  

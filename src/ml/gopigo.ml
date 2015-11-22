@@ -24,7 +24,7 @@ let cmd ?d1 ?d2 ?d3 id =
   cmd
 
 let write {fd} cmd : unit Lwt.t = 
-  Lwt_io.printl "write"
+  Lwt.return_unit 
   >>=(fun () ->
     Lwt_unix.write fd cmd 0 5 
   )
@@ -46,14 +46,14 @@ let read {fd} n : bytes Lwt.t =
     | i -> (
       Lwt_unix.read fd b i 1 
       >>= (fun _ -> 
-        Lwt_unix.sleep 0.010
+        Lwt_unix.sleep 0.005
       )
       >>= (fun () -> 
         loop (i + 1)
       )
     ) 
   in 
-  Lwt_io.printl "read"
+  Lwt.return_unit 
   >>=(fun () -> loop 0) 
 
 let device_mtx = Lwt_mutex.create ()   
