@@ -18,8 +18,7 @@ end)
 let gopigo_handle = Gopigo.create () 
 
 let ok_output = Lwt.return {
-  Msg.encoder_value = None; 
-  us_distance = None; 
+  Msg.sensors      = None; 
   type_ = Msg.Ok
 }
 
@@ -53,7 +52,7 @@ let handle_command {Msg.type_ ; side; speed_value} =
      >>= (fun () -> ok_output)
   | _ -> Lwt.fail_with "Unrecognize command" 
 
-let rec main_loop gopigo cmd_queue = 
+let rec main_loop gopigo cmd_queue next = 
   let t0 = Unix.gettimeofday () in 
   
   Gopigo.read_encoder gopigo `Left 
@@ -83,13 +82,15 @@ let rec main_loop gopigo cmd_queue =
     if Queue.length cmd_queue > 0 
     then (
       let cmd = Queue.pop cmd_queue in 
+      Printf.printf "executing cmd %s \n%!" (Msg.string_of_command cmd); 
       handle_command cmd >>= (fun _ -> Lwt.return_unit) 
     )
     else Lwt.return_unit 
   ) 
   >>= (fun () -> 
+    next := (!next +. 0.300); 
     let t1 = Unix.gettimeofday () in 
-    let sleep_s = 0.250 -. (t1 -. t0) in 
+    let sleep_s = !next  -. t1 in
     if sleep_s >= 0. 
     then Lwt_unix.sleep sleep_s
     else (
@@ -97,38 +98,56 @@ let rec main_loop gopigo cmd_queue =
       Lwt.return_unit
     )
   )
-  >>=(fun () -> main_loop gopigo cmd_queue) 
+  >>=(fun () -> main_loop gopigo cmd_queue next) 
 
 let init gopigo = 
-  Gopigo.set_speed gopigo `Left 65
-  >>=(fun () -> Gopigo.set_speed gopigo `Right 75)
+  Gopigo.set_speed gopigo `Left 35
+  >>=(fun () -> Gopigo.set_speed gopigo `Right 55)
 
-let pipe_name = "/tmp/gopigo_server" 
+let pipe_name_in  = "/tmp/gopigo_server.in" 
+let pipe_name_out = "/tmp/gopigo_server.out" 
+
+let open_pipes () = 
+  let create_if_not_exist file_name =  
+    if not (Sys.file_exists file_name)
+    then Unix.mkfifo file_name 0o666
+  in
+
+  create_if_not_exist pipe_name_in;
+  create_if_not_exist pipe_name_out;
+
+  Lwt_unix.openfile pipe_name_in [Unix.O_RDWR; Unix.O_TRUNC] 0o666
+  >>= (fun read_fd -> 
+    Lwt_unix.openfile pipe_name_out [Unix.O_RDWR; Unix.O_TRUNC] 0o666
+    >>=(fun write_fd -> 
+      Lwt.return (read_fd, write_fd)
+    )
+  )
 
 let () = 
 
   ignore @@ Unix.umask 0o000; 
-  if not (Sys.file_exists pipe_name)
-  then Unix.mkfifo pipe_name 0o666;  
-    
+
   let cmd_queue = Queue.create () in 
 
   let t = 
-    Lwt_unix.openfile pipe_name [Unix.O_RDWR;Unix.O_CREAT; Unix.O_TRUNC] 0o666
-    >>= (fun fd -> 
-
+    open_pipes () 
+    >>=(fun (read_fd, write_fd) ->   
       let rec loop () = 
-        Command_lwt.read fd 
+        Command_lwt.read read_fd 
         >>= (fun cmd -> 
           match cmd with
-          | {Msg.type_ = Msg.Read_us_distance; side = None; speed_value = None; } -> (
+          | {Msg.type_ = Msg.Sensors; side = None; speed_value = None; } -> (
             
             let output = {
-              Msg.type_ = Us_distance;  
-              Msg.encoder_value = None;
-              Msg.us_distance = Some (robot.us_distance);
+              Msg.type_ = Sensors;  
+              Msg.sensors = Some {
+                Msg.left_encoder = robot.left_encoder;
+                Msg.right_encoder = robot.right_encoder;
+                Msg.us_distance = robot.us_distance;
+              };
             } in 
-            Output_lwt.write fd output 
+            Output_lwt.write write_fd output 
           )
           | _ -> Lwt.return @@ Queue.push cmd cmd_queue 
         ) 
@@ -140,5 +159,7 @@ let () =
 
   Lwt_main.run (Lwt.join [
     t;  
-    init gopigo_handle >>= (fun () -> main_loop gopigo_handle cmd_queue) 
+    init gopigo_handle >>= (fun () -> 
+      main_loop gopigo_handle cmd_queue (ref @@ Unix.gettimeofday ())
+    ) 
   ])  

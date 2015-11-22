@@ -1,9 +1,8 @@
 type command_type =
+  | Sensors 
   | Fwd 
   | Stop 
   | Set_speed 
-  | Read_encoder 
-  | Read_us_distance 
   | Led_on 
   | Led_off 
 
@@ -44,10 +43,24 @@ val encode_command : command -> Protobuf_codec.Encoder.t -> unit
 val string_of_command : command -> string 
 (** [string_of_command v] returns a debugging string for [v] *)
 
+type sensors = {
+  left_encoder : int;
+  right_encoder : int;
+  us_distance : float;
+}
+
+val decode_sensors : Protobuf_codec.Decoder.t -> sensors
+(** [decode_sensors decoder] decodes a [sensors] value from [decoder] *)
+
+val encode_sensors : sensors -> Protobuf_codec.Encoder.t -> unit
+(** [encode_sensors v encoder] encodes [v] with the given [encoder] *)
+
+val string_of_sensors : sensors -> string 
+(** [string_of_sensors v] returns a debugging string for [v] *)
+
 type output_type =
   | Ok 
-  | Encoder_value 
-  | Us_distance 
+  | Sensors 
 
 val decode_output_type : Protobuf_codec.Decoder.t -> output_type
 (** [decode_output_type decoder] decodes a [output_type] value from [decoder] *)
@@ -60,8 +73,7 @@ val string_of_output_type : output_type -> string
 
 type output = {
   type_ : output_type;
-  encoder_value : int option;
-  us_distance : float option;
+  sensors : sensors option;
 }
 
 val decode_output : Protobuf_codec.Decoder.t -> output

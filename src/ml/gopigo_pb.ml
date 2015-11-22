@@ -119,42 +119,38 @@ let oneof numbers a =
 let e () = failwith "programmatic error" 
 
 type command_type =
+  | Sensors 
   | Fwd 
   | Stop 
   | Set_speed 
-  | Read_encoder 
-  | Read_us_distance 
   | Led_on 
   | Led_off 
 
 let rec decode_command_type d = 
   match decode_varint_as_int d with
-  | 1 -> Fwd
-  | 2 -> Stop
-  | 3 -> Set_speed
-  | 4 -> Read_encoder
-  | 5 -> Read_us_distance
-  | 6 -> Led_on
+  | 1 -> Sensors
+  | 2 -> Fwd
+  | 3 -> Stop
+  | 4 -> Set_speed
+  | 5 -> Led_on
   | 6 -> Led_off
   | _ -> failwith "Unknown value for enum command_type"
 
 let rec encode_command_type v encoder =
   match v with
-  | Fwd -> encode_int_as_varint 1 encoder
-  | Stop -> encode_int_as_varint 2 encoder
-  | Set_speed -> encode_int_as_varint 3 encoder
-  | Read_encoder -> encode_int_as_varint 4 encoder
-  | Read_us_distance -> encode_int_as_varint 5 encoder
-  | Led_on -> encode_int_as_varint 6 encoder
+  | Sensors -> encode_int_as_varint 1 encoder
+  | Fwd -> encode_int_as_varint 2 encoder
+  | Stop -> encode_int_as_varint 3 encoder
+  | Set_speed -> encode_int_as_varint 4 encoder
+  | Led_on -> encode_int_as_varint 5 encoder
   | Led_off -> encode_int_as_varint 6 encoder
 
 let rec string_of_command_type v =
   match v with
+  | Sensors -> "Sensors"
   | Fwd -> "Fwd"
   | Stop -> "Stop"
   | Set_speed -> "Set_speed"
-  | Read_encoder -> "Read_encoder"
-  | Read_us_distance -> "Read_us_distance"
   | Led_on -> "Led_on"
   | Led_off -> "Led_off"
 
@@ -225,74 +221,96 @@ let rec string_of_command v =
     | None -> "\nspeed_value: None");
   ]
 
-type output_type =
-  | Ok 
-  | Encoder_value 
-  | Us_distance 
-
-let rec decode_output_type d = 
-  match decode_varint_as_int d with
-  | 1 -> Ok
-  | 2 -> Encoder_value
-  | 3 -> Us_distance
-  | _ -> failwith "Unknown value for enum output_type"
-
-let rec encode_output_type v encoder =
-  match v with
-  | Ok -> encode_int_as_varint 1 encoder
-  | Encoder_value -> encode_int_as_varint 2 encoder
-  | Us_distance -> encode_int_as_varint 3 encoder
-
-let rec string_of_output_type v =
-  match v with
-  | Ok -> "Ok"
-  | Encoder_value -> "Encoder_value"
-  | Us_distance -> "Us_distance"
-
-type output = {
-  type_ : output_type;
-  encoder_value : int option;
-  us_distance : float option;
+type sensors = {
+  left_encoder : int;
+  right_encoder : int;
+  us_distance : float;
 }
 
-let rec decode_output =
-  let output_mappings = [
-    (1, (fun d -> `Output_type (decode_output_type d)));
+let rec decode_sensors =
+  let sensors_mappings = [
+    (1, (fun d -> `Int (decode_varint_as_int d)));
     (2, (fun d -> `Int (decode_varint_as_int d)));
     (3, (fun d -> `Float (decode_bits64_as_float d)));
   ]
   in
   (fun d ->
-    let a = decode d output_mappings (Array.make 4 []) in {      
+    let a = decode d sensors_mappings (Array.make 4 []) in {      
+      left_encoder = required 1 a (function | `Int __v -> __v | _ -> e());
+      right_encoder = required 2 a (function | `Int __v -> __v | _ -> e());
+      us_distance = required 3 a (function | `Float __v -> __v | _ -> e());
+    }
+  )
+
+let rec encode_sensors v encoder =   
+  Pc.Encoder.key (1, Pc.Varint) encoder; 
+  encode_int_as_varint v.left_encoder encoder;
+  Pc.Encoder.key (2, Pc.Varint) encoder; 
+  encode_int_as_varint v.right_encoder encoder;
+  Pc.Encoder.key (3, Pc.Bits64) encoder; 
+  encode_float_as_bits64 v.us_distance encoder;
+  ()
+
+let rec string_of_sensors v = 
+  add_indentation 1 @@ String.concat "" [    
+    (let x = v.left_encoder in P.sprintf "\nleft_encoder: %i" x);
+    (let x = v.right_encoder in P.sprintf "\nright_encoder: %i" x);
+    (let x = v.us_distance in P.sprintf "\nus_distance: %f" x);
+  ]
+
+type output_type =
+  | Ok 
+  | Sensors 
+
+let rec decode_output_type d = 
+  match decode_varint_as_int d with
+  | 1 -> Ok
+  | 2 -> Sensors
+  | _ -> failwith "Unknown value for enum output_type"
+
+let rec encode_output_type v encoder =
+  match v with
+  | Ok -> encode_int_as_varint 1 encoder
+  | Sensors -> encode_int_as_varint 2 encoder
+
+let rec string_of_output_type v =
+  match v with
+  | Ok -> "Ok"
+  | Sensors -> "Sensors"
+
+type output = {
+  type_ : output_type;
+  sensors : sensors option;
+}
+
+let rec decode_output =
+  let output_mappings = [
+    (1, (fun d -> `Output_type (decode_output_type d)));
+    (2, (fun d -> `Sensors (decode_sensors (Pc.Decoder.nested d))));
+  ]
+  in
+  (fun d ->
+    let a = decode d output_mappings (Array.make 3 []) in {      
       type_ = required 1 a (function | `Output_type __v -> __v | _ -> e());
-      encoder_value = optional 2 a (function | `Int __v -> __v | _ -> e());
-      us_distance = optional 3 a (function | `Float __v -> __v | _ -> e());
+      sensors = optional 2 a (function | `Sensors __v -> __v | _ -> e());
     }
   )
 
 let rec encode_output v encoder =   
   Pc.Encoder.key (1, Pc.Varint) encoder; 
   encode_output_type v.type_ encoder;
-  (match v.encoder_value with 
+  (match v.sensors with 
   | Some x -> (  
-    Pc.Encoder.key (2, Pc.Varint) encoder; 
-    encode_int_as_varint x encoder;)
-  | None -> ());
-  (match v.us_distance with 
-  | Some x -> (  
-    Pc.Encoder.key (3, Pc.Bits64) encoder; 
-    encode_float_as_bits64 x encoder;)
+    Pc.Encoder.key (2, Pc.Bytes) encoder; 
+    Pc.Encoder.nested (encode_sensors x) encoder;)
   | None -> ());
   ()
 
 let rec string_of_output v = 
   add_indentation 1 @@ String.concat "" [    
     (let x = v.type_ in P.sprintf "\ntype_: %s" @@ string_of_output_type x);
-    (match v.encoder_value with 
-    | Some x -> (P.sprintf "\nencoder_value: %i" x)
-    | None -> "\nencoder_value: None");
-    (match v.us_distance with 
-    | Some x -> (P.sprintf "\nus_distance: %f" x)
-    | None -> "\nus_distance: None");
+    (match v.sensors with 
+    | Some x -> (P.sprintf "\nsensors: %s" @@ string_of_sensors x)
+    | None -> "\nsensors: None");
   ]
 
