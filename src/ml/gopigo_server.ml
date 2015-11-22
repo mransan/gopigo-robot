@@ -15,41 +15,93 @@ module Output_lwt = Pblwtrt.Make(struct
   let decode = Msg.decode_output
 end)
 
-let gopigo_handle = Gopigo.create () 
 
 let ok_output = Lwt.return {
   Msg.sensors      = None; 
   type_ = Msg.Ok
 }
 
-type robot = {
+type robot_sensors = {
+  mutable left_encoder_reference : int; 
+  mutable right_encoder_reference : int; 
   mutable left_encoder : int; 
   mutable right_encoder : int; 
   mutable us_distance : float; 
 }
 
+type robot = {
+  sensors : robot_sensors;
+  mutable left_led : bool;
+  mutable right_led : bool;
+  mutable movement : [`Fwd  | `Bwd | `Stop];
+  mutable left_speed : int;
+  mutable right_speed : int;
+}
+
 let robot = {
-  left_encoder = 0;
-  right_encoder = 0;
-  us_distance = 0.; 
+  sensors = {
+    left_encoder_reference = 0;
+    right_encoder_reference = 0;
+    left_encoder = 0;
+    right_encoder = 0;
+    us_distance = 0.; 
+  };
+  left_led = false; 
+  right_led = false; 
+  movement = `Stop; 
+  left_speed = 35; 
+  right_speed = 45; 
 }
 
 let convert_side = function 
   | Msg.Left -> `Left 
   | Msg.Right -> `Right
 
-let handle_command {Msg.type_ ; side; speed_value} =  
+let handle_command gopigo_handle {Msg.type_ ; side; speed_value} =  
 
   match type_, side, speed_value with
   | Msg.Fwd, None, None-> 
-      Gopigo.fwd gopigo_handle
-      >>= (fun () -> ok_output) 
+    Gopigo.fwd gopigo_handle
+    >>= (fun () -> 
+      robot.movement <-  `Fwd; 
+      ok_output
+    ) 
   | Msg.Stop, None, None -> 
-     Gopigo.stop gopigo_handle 
-     >>= (fun () -> ok_output)  
+    Gopigo.stop gopigo_handle 
+     >>= (fun () -> 
+       robot.movement <-  `Stop; 
+       ok_output
+     )  
   | Msg.Set_speed, Some side, Some speed_value -> 
-     Gopigo.set_speed gopigo_handle (convert_side side) speed_value
-     >>= (fun () -> ok_output)
+    Gopigo.set_speed gopigo_handle (convert_side side) speed_value
+    >>= (fun () -> 
+      begin
+        match side with 
+        | Msg.Left -> robot.left_speed <- speed_value
+        | Msg.Right-> robot.right_speed <- speed_value
+      end;
+      ok_output
+    )  
+  | Msg.Led_on, Some side, None -> 
+    Gopigo.led gopigo_handle `On (convert_side side) 
+    >>= (fun () -> 
+      begin
+        match side with 
+        | Msg.Left -> robot.left_led <- true 
+        | Msg.Right-> robot.right_led <- true
+      end;
+      ok_output
+    )
+  | Msg.Led_off, Some side, None -> 
+    Gopigo.led gopigo_handle `Off (convert_side side) 
+    >>= (fun () -> 
+      begin
+        match side with 
+        | Msg.Left -> robot.left_led <- false 
+        | Msg.Right-> robot.right_led <- false
+      end;
+      ok_output
+    )
   | _ -> Lwt.fail_with "Unrecognize command" 
 
 let rec main_loop gopigo cmd_queue next = 
@@ -69,21 +121,24 @@ let rec main_loop gopigo cmd_queue next =
     )
   )
   >>=(fun ((left, right), us_distance) -> 
-    robot.left_encoder  <- left;
-    robot.right_encoder <- right;
-    robot.us_distance   <- us_distance;
-
+    robot.sensors.left_encoder  <- left;
+    robot.sensors.right_encoder <- right;
+    robot.sensors.us_distance   <- us_distance;
     let t1 = Unix.gettimeofday () in 
     let elapsed_ms = (t1 -. t0) *. 1_000. in
+    (*
     Lwt.ignore_result @@ Lwt_io.printf "%10.5f | (%i, %i), %f\n" elapsed_ms left right us_distance;
+    *)
     Lwt.return_unit
   )
   >>= (fun () -> 
     if Queue.length cmd_queue > 0 
     then (
       let cmd = Queue.pop cmd_queue in 
+      (*
       Printf.printf "executing cmd %s \n%!" (Msg.string_of_command cmd); 
-      handle_command cmd >>= (fun _ -> Lwt.return_unit) 
+      *)
+      handle_command gopigo cmd >>= (fun _ -> Lwt.return_unit) 
     )
     else Lwt.return_unit 
   ) 
@@ -101,8 +156,17 @@ let rec main_loop gopigo cmd_queue next =
   >>=(fun () -> main_loop gopigo cmd_queue next) 
 
 let init gopigo = 
-  Gopigo.set_speed gopigo `Left 35
-  >>=(fun () -> Gopigo.set_speed gopigo `Right 55)
+  Gopigo.set_speed gopigo `Left robot.left_speed 
+  >>=(fun () -> Gopigo.set_speed gopigo `Right robot.right_speed)
+  >>=(fun () -> Gopigo.read_encoder gopigo `Left) 
+  >|=(fun i  -> robot.sensors.left_encoder_reference <- i)
+  >>=(fun () -> Gopigo.read_encoder gopigo `Right) 
+  >|=(fun i  -> robot.sensors.right_encoder_reference <- i)
+  >>=(fun () ->
+    match robot.movement with
+    | `Fwd -> Gopigo.fwd gopigo
+    | `Stop -> Gopigo.stop gopigo
+  )
 
 let pipe_name_in  = "/tmp/gopigo_server.in" 
 let pipe_name_out = "/tmp/gopigo_server.out" 
@@ -138,13 +202,13 @@ let () =
         >>= (fun cmd -> 
           match cmd with
           | {Msg.type_ = Msg.Sensors; side = None; speed_value = None; } -> (
-            
+            let sensors = robot.sensors in 
             let output = {
-              Msg.type_ = Sensors;  
+              Msg.type_ = Msg.Sensors;  
               Msg.sensors = Some {
-                Msg.left_encoder = robot.left_encoder;
-                Msg.right_encoder = robot.right_encoder;
-                Msg.us_distance = robot.us_distance;
+                Msg.left_encoder = sensors.left_encoder - sensors.left_encoder_reference;
+                Msg.right_encoder = sensors.right_encoder - sensors.right_encoder_reference;
+                Msg.us_distance = sensors.us_distance;
               };
             } in 
             Output_lwt.write write_fd output 
@@ -157,9 +221,28 @@ let () =
     )
   in 
 
+  let main gopigo_handle () = 
+    init gopigo_handle
+    >>= (fun () ->
+      main_loop gopigo_handle cmd_queue (ref @@ Unix.gettimeofday ())
+    )
+  in 
+
+  let rec f () = 
+    let gopigo_handle = Gopigo.create () in 
+    Lwt_io.printl "C'est reparti"
+    >>= (fun () -> 
+      Lwt.catch (main gopigo_handle) (fun exn ->
+        Gopigo.close gopigo_handle 
+        >>=(fun () -> 
+          Lwt_unix.sleep 0.5 >>= f 
+        )
+      )
+    )
+  in 
+
+
   Lwt_main.run (Lwt.join [
     t;  
-    init gopigo_handle >>= (fun () -> 
-      main_loop gopigo_handle cmd_queue (ref @@ Unix.gettimeofday ())
-    ) 
+    f ();
   ])  

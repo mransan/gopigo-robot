@@ -53,24 +53,82 @@ let print_sensors read_fd write_fd =
     | _ -> Lwt.fail_with "Unexpected response"
   )
 
+let get_int b i = Char.code @@ Bytes.get b i 
+
+let current_speed = ref 35 
+let diff_speed    = ref 0
+
+let change_speed what write_fd = 
+  begin 
+    match what with
+    | `Increase -> current_speed := !current_speed + 2
+    | `Decrease -> current_speed := !current_speed - 2
+    | `Left     -> ( 
+      diff_speed    := !diff_speed + 4;
+      current_speed := !current_speed - 2
+    )
+    | `Right    -> (
+      diff_speed    := !diff_speed - 4;
+      current_speed := !current_speed + 2
+    )
+  end;
+  let cmd = {
+    Msg.type_ = Msg.Set_speed; 
+    Msg.side  = Some Msg.Left; 
+    Msg.speed_value = (Some !current_speed);
+  } in 
+  send_cmd write_fd cmd
+  >>=(fun _ -> 
+    let cmd = {cmd with 
+      Msg.side = (Some Msg.Right);
+      Msg.speed_value = Some (!current_speed + 10 + !diff_speed); 
+    } in 
+    send_cmd write_fd cmd 
+  ) 
+
 let () = 
+  ignore @@ Sys.command "stty raw -echo" ;
   let fwd = {default_cmd with Msg.type_ = Msg.Fwd } in 
   let stop= {default_cmd with Msg.type_ = Msg.Stop} in 
+
+  let rec loop write_fd () = 
+    let b = Bytes.create 2 in 
+    Lwt_unix.read Lwt_unix.stdin b 0 1 
+    >>=(fun x ->
+      (match x with 
+      | 1 -> (
+        match get_int b 0  with 
+        | 27 -> 
+          Lwt_unix.read Lwt_unix.stdin b 0 2
+          >>=(fun _ -> 
+            match get_int b 0, get_int b 1 with
+            | 91, 65 -> change_speed `Increase write_fd 
+            | 91, 66 -> change_speed `Decrease write_fd 
+            | 91, 67 -> change_speed `Right write_fd 
+            | 91, 68 -> change_speed `Left write_fd 
+            | _ -> Lwt.return_unit 
+          )
+        | 32  -> Lwt_io.printl "space"
+        | 113 -> (
+          send_cmd write_fd stop 
+          >>= (fun () ->
+            Sys.command "stty sane"; 
+            exit 0
+          )
+        )
+        | _ -> Lwt.return_unit
+      )
+      | _ -> Lwt.fail_with "Error reading stdin"
+      ) 
+      >>= loop write_fd  
+    )
+  in 
 
   let t = 
     open_pipes ()
     >>= (fun (read_fd, write_fd) -> 
       send_cmd write_fd fwd
-      >>= (fun () -> Lwt_unix.sleep 2.)
-      >>= (fun () -> send_cmd write_fd stop) 
-      >>= (fun () -> 
-        let rec loop () = 
-          print_sensors read_fd write_fd 
-          >>= (fun () -> Lwt_unix.sleep 0.1) 
-          >>= loop 
-        in
-        loop ()
-      )
+      >>= loop write_fd 
     )
   in 
   Lwt_main.run t 

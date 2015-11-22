@@ -9,6 +9,8 @@ type t = {
 let create () = 
   {fd = Lwt_unix.of_unix_file_descr ~blocking:false @@ gopigo_init_device () } 
 
+let close {fd; } = Lwt_unix.close fd 
+
 let if_some v f = 
   match v with 
   | None -> () 

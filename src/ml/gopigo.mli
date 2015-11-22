@@ -8,6 +8,8 @@ val create: unit -> t
     done per task. 
  *)
 
+val close: t -> unit Lwt.t  
+
 val fwd : t -> unit Lwt.t 
 (** [fwd t] send the forward command to the GoPiGo *)
 
